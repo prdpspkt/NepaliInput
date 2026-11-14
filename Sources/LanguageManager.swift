@@ -53,7 +53,7 @@ class LanguageManager {
         }
     }
 
-    /// All supported languages with their Google Input Tools API codes and native numerals
+    /// All supported languages with their language codes and native numerals
     let supportedLanguages: [Language]
 
     /// The currently selected language

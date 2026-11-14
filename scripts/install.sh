@@ -55,15 +55,14 @@ uninstall() {
 [[ -n "${1:-}" ]] && die "Unknown option: $1"
 
 command -v swiftc >/dev/null || die "swiftc not found. Install Xcode Command Line Tools: xcode-select --install"
-[[ "$(uname -m)" == "arm64" ]] || warn "Build targets arm64; this Mac is $(uname -m) and the app may not load."
 
 # 1. Build the app bundle.
 log "Building $APP_BUNDLE"
 make -C "$ROOT" build
 
-# 2. Compile the registration helper.
-log "Compiling registration helper"
-swiftc -O "$HELPER_SRC" -o "$HELPER_BIN" -framework Carbon -framework Foundation
+# 2. Build the universal registration helper.
+log "Building registration helper"
+make -C "$ROOT" helper >/dev/null
 
 # 3. Install into ~/Library/Input Methods.
 log "Installing to $DEST_DIR"

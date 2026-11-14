@@ -9,7 +9,7 @@ import Foundation
 /// 2. N-Gram Context Modeling: Learns word transitions (e.g., following "खाना", "पानी" ranks higher than "पनि").
 /// 3. Recency Scoring: Recently typed words receive exponential recency boosts.
 /// 4. Dynamic Candidate Injection: Custom names and unique spellings committed by the user
-///    are retained and injected into candidates even if Google API misses them or when offline.
+///    are retained and injected into candidates even if the offline engine misses them.
 /// 5. 100% On-Device & Private: No telemetry or typing data is ever transmitted.
 class MLAdaptiveEngine {
     static let shared = MLAdaptiveEngine()

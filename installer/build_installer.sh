@@ -14,7 +14,7 @@ set -euo pipefail
 # Stop macOS from adding AppleDouble "._" files to the package payload.
 export COPYFILE_DISABLE=1
 
-VERSION="1.0"
+VERSION="1.1"
 APP_NAME="NepaliInput"
 APP_BUNDLE="$APP_NAME.app"
 PKG_ID="com.pradeeps.inputmethod.NepaliInput.installer"
@@ -34,11 +34,8 @@ command -v swiftc >/dev/null || die "Install Xcode Command Line Tools: xcode-sel
 log "Building $APP_BUNDLE"
 make -C "$ROOT" build
 
-# 2. Compile the registration helper into the app bundle.
-log "Compiling registration helper"
-swiftc -O "$ROOT/scripts/register_input_source.swift" \
-    -o "$BUILD/$APP_BUNDLE/Contents/Resources/register_input_source" \
-    -framework Carbon -framework Foundation
+# The registration helper is built universal and copied into the bundle by `make build`.
+test -x "$BUILD/$APP_BUNDLE/Contents/Resources/register_input_source" || die "Helper missing from bundle"
 
 # 3. Re-sign so the bundle (including the helper) has a valid signature.
 codesign --force --deep --sign - --entitlements "$ROOT/Resources/NepaliInput.entitlements" "$BUILD/$APP_BUNDLE"

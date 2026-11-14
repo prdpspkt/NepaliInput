@@ -1,234 +1,336 @@
 import Foundation
 
-// MARK: - Offline Phonetic & Statistical Transliteration Engine
+// MARK: - Offline Transliteration Engine
+//
+// Two layers, in order:
+//   1. Seed lexicon (Resources/lexicon/ne_seed_lexicon.tsv): common words with a frequency score.
+//   2. Rule-based phonetic converter for everything else.
+//
+// Lexicon entries are original work written for this project (see the file header), so they can be
+// bundled and redistributed without a third-party license.
 
-/// Provides on-device offline transliteration for Nepali and Devanagari when network
-/// is unavailable or when instant local candidates are required.
-class OfflineTransliterationEngine {
-    static let shared = OfflineTransliterationEngine()
+final class OfflineTransliterationEngine {
+    typealias LexiconEntry = (roman: String, word: String, score: Int)
 
-    // High-frequency curated Nepali vocabulary
-    private let dictionary: [String: [String]] = [
-        "namaste": ["नमस्ते", "नमस्ते!"],
-        "namaskar": ["नमस्कार"],
-        "nepal": ["नेपाल"],
-        "nepali": ["नेपाली", "नेपाल"],
-        "mero": ["मेरो"],
-        "tera": ["तेरो"],
-        "terai": ["तराई"],
-        "timro": ["तिम्रो"],
-        "tapai": ["तपाईं", "तपाई"],
-        "tapain": ["तपाईं"],
-        "timi": ["तिमी"],
-        "ma": ["म", "मा"],
-        "hami": ["हामी"],
-        "hamro": ["हाम्रो"],
-        "kasto": ["कस्तो"],
-        "kahan": ["कहाँ"],
-        "kahile": ["कहिल्यै", "कहिले"],
-        "kina": ["किन"],
-        "ke": ["के"],
-        "ko": ["को"],
-        "kasari": ["कसरी"],
-        "chha": ["छ", "छन्"],
-        "chhan": ["छन्"],
-        "chhaina": ["छैन"],
-        "chhainam": ["छैनौँ", "छैन"],
-        "ho": ["हो", "होस्"],
-        "haina": ["होइन", "हैन"],
-        "hunchha": ["हुन्छ"],
-        "hudaina": ["हुँदैन"],
-        "pani": ["पनि", "पानी"],
-        "paani": ["पानी"],
-        "bata": ["बाट"],
-        "dekhi": ["देखि"],
-        "lai": ["लाई"],
-        "le": ["ले"],
-        "sanga": ["सँग"],
-        "sath": ["साथ"],
-        "dhanyabaad": ["धन्यवाद"],
-        "dhanyabad": ["धन्यवाद"],
-        "swagatam": ["स्वागतम्", "स्वागतम"],
-        "swagat": ["स्वागत"],
-        "subhapravat": ["शुभप्रभात"],
-        "shubharatri": ["शुभरात्री", "शुभरात्रि"],
-        "ramro": ["राम्रो"],
-        "naramro": ["नराम्रो"],
-        "mitho": ["मीठो", "मिठो"],
-        "ghar": ["घर"],
-        "kam": ["काम"],
-        "keto": ["केटो"],
-        "keti": ["केटी"],
-        "manchhe": ["मान्छे"],
-        "sathi": ["साथी"],
-        "aama": ["आमा"],
-        "baba": ["बाबा", "बुबा"],
-        "buba": ["बुबा"],
-        "daju": ["दाजु"],
-        "bhai": ["भाइ"],
-        "didi": ["दीदी", "दिदी"],
-        "bahini": ["बहिनी"],
-        "desh": ["देश"],
-        "bidesh": ["विदेश"],
-        "khana": ["खाना"],
-        "dudh": ["दूध"],
-        "bhat": ["भात"],
-        "chiya": ["चिया"],
-        "aaja": ["आज"],
-        "bholi": ["भोलि"],
-        "hijo": ["हिजो"],
-        "batawaran": ["वातावरण"],
-        "samachar": ["समाचार"],
-        "kathmandu": ["काठमाडौं", "काठमाडौँ"],
-        "pokhara": ["पोखरा"],
-        "lalitpur": ["ललितपुर"],
-        "bhaktapur": ["भक्तपुर"],
-        "biratnagar": ["विराटनगर"],
-        "dharan": ["धरान"],
-        "butwal": ["बुटवल"],
-    ]
+    static let shared = OfflineTransliterationEngine(lexicon: loadBundledLexicon())
 
-    private init() {}
+    /// Romanized word -> candidates, highest score first.
+    private let lexicon: [String: [(word: String, score: Int)]]
 
-    /// Transliterate Latin input into Devanagari candidates offline
+    init(lexicon entries: [LexiconEntry]) {
+        var table: [String: [(word: String, score: Int)]] = [:]
+        for entry in entries {
+            table[entry.roman.lowercased(), default: []].append((word: entry.word, score: entry.score))
+        }
+        for key in table.keys {
+            table[key]?.sort { $0.score > $1.score }
+        }
+        self.lexicon = table
+    }
+
+    // MARK: Lexicon loading
+
+    /// Parses TSV lines of `roman<TAB>devanagari<TAB>score`. Lines starting with `#` are comments.
+    static func parseLexicon(_ text: String) -> [LexiconEntry] {
+        var entries: [LexiconEntry] = []
+        for line in text.split(whereSeparator: \.isNewline) {
+            if line.hasPrefix("#") { continue }
+            let columns = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard columns.count == 3, let score = Int(columns[2]) else { continue }
+            entries.append((roman: String(columns[0]), word: String(columns[1]), score: score))
+        }
+        return entries
+    }
+
+    static func loadBundledLexicon() -> [LexiconEntry] {
+        guard let url = Bundle.main.url(forResource: "ne_seed_lexicon", withExtension: "tsv"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            NSLog("NepaliInput: seed lexicon missing; using phonetic rules only")
+            return []
+        }
+        return parseLexicon(text)
+    }
+
+    // MARK: Candidates
+
+    /// Transliterate Latin input into Devanagari candidates offline.
     func transliterate(text: String, languageCode: String) -> [String] {
         guard !text.isEmpty else { return [] }
         let lower = text.lowercased()
         var results: [String] = []
 
-        // 1. Direct dictionary lookup
-        if let dictMatches = dictionary[lower] {
-            results.append(contentsOf: dictMatches)
+        func add(_ candidate: String) {
+            if !candidate.isEmpty && !results.contains(candidate) {
+                results.append(candidate)
+            }
         }
 
-        // 2. Phonetic rule-based translation
-        let phonetic = convertPhonetic(lower)
-        if !results.contains(phonetic) {
-            results.append(phonetic)
+        // 1. Lexicon words, most frequent first.
+        for entry in lexicon[lower] ?? [] {
+            add(entry.word)
         }
-
-        // 3. Alternative vowel/consonant representations
-        let alt = generateAlternative(lower)
-        if let altWord = alt, !results.contains(altWord) {
-            results.append(altWord)
+        // 2. Rule-based spelling first, then every other valid spelling of the nasals (n, m).
+        for candidate in variants(lower) {
+            add(candidate)
         }
-
-        // 4. Raw Latin text fallback
-        if !results.contains(text) {
-            results.append(text)
+        // 3. Common spelling variant (v <-> b, sh -> s).
+        if let variant = spellingVariant(lower) {
+            add(phonetic(variant))
         }
+        // 4. Raw Latin text.
+        add(text)
 
         return results
     }
 
-    private func convertPhonetic(_ input: String) -> String {
-        var result = ""
-        var i = input.startIndex
-
-        let consonants: [(pattern: String, base: String)] = [
-            ("ksha", "क्ष"), ("ksh", "क्ष्"),
-            ("tra", "त्र"),   ("tr", "त्र्"),
-            ("gya", "ज्ञ"),   ("gy", "ज्ञ्"),
-            ("chha", "छ"),   ("chh", "छ्"),
-            ("shree", "श्री"),("shr", "श्र्"),
-            ("kh", "ख"),     ("gh", "घ"),    ("ng", "ङ"),
-            ("ch", "च"),     ("jh", "झ"),    ("ny", "ञ"),
-            ("th", "थ"),     ("dh", "ध"),    ("ph", "फ"),
-            ("bh", "भ"),     ("sh", "श"),    ("shh", "ष"),
-            ("k", "क"),      ("g", "ग"),     ("j", "ज"),
-            ("t", "त"),      ("d", "द"),     ("n", "न"),
-            ("p", "प"),      ("b", "ब"),     ("m", "म"),
-            ("y", "य"),      ("r", "र"),     ("l", "ल"),
-            ("w", "व"),      ("v", "व"),     ("s", "स"),
-            ("h", "ह")
-        ]
-
-        let vowels: [(pattern: String, indep: String, matra: String)] = [
-            ("aa", "आ", "ा"), ("ee", "ई", "ी"), ("oo", "ऊ", "ू"),
-            ("ai", "ऐ", "ै"), ("au", "औ", "ौ"), ("ri", "ऋ", "ृ"),
-            ("a", "अ", ""),   ("i", "इ", "ि"), ("u", "उ", "ु"),
-            ("e", "ए", "े"),   ("o", "ओ", "ो")
-        ]
-
-        while i < input.endIndex {
-            let remaining = String(input[i...])
-
-            // Standalone vowel
-            var matchedVowel = false
-            for (pattern, indep, _) in vowels {
-                if remaining.hasPrefix(pattern) {
-                    result.append(indep)
-                    i = input.index(i, offsetBy: pattern.count)
-                    matchedVowel = true
-                    break
-                }
-            }
-            if matchedVowel { continue }
-
-            // Consonant
-            var matchedConsonant = false
-            for (pattern, base) in consonants {
-                if remaining.hasPrefix(pattern) {
-                    result.append(base)
-                    i = input.index(i, offsetBy: pattern.count)
-                    matchedConsonant = true
-
-                    if base.hasSuffix("्") {
-                        break
-                    }
-
-                    if i < input.endIndex {
-                        let after = String(input[i...])
-                        var vowelAttached = false
-                        for (vpat, _, matra) in vowels {
-                            if after.hasPrefix(vpat) {
-                                result.append(matra)
-                                i = input.index(i, offsetBy: vpat.count)
-                                vowelAttached = true
-                                break
-                            }
-                        }
-                        if !vowelAttached {
-                            var nextIsConsonant = false
-                            for (cpat, _) in consonants {
-                                if after.hasPrefix(cpat) {
-                                    nextIsConsonant = true
-                                    break
-                                }
-                            }
-                            if nextIsConsonant {
-                                result.append("्")
-                            }
-                        }
-                    }
-                    break
-                }
-            }
-            if matchedConsonant { continue }
-
-            // Digits (Devanagari mapping)
-            let char = input[i]
-            let digits = ["०", "१", "२", "३", "४", "५", "६", "७", "८", "९"]
-            if let ascii = char.asciiValue, ascii >= 48 && ascii <= 57 {
-                result.append(digits[Int(ascii - 48)])
-            } else {
-                result.append(char)
-            }
-            i = input.index(after: i)
-        }
-
-        return result
+    private func spellingVariant(_ input: String) -> String? {
+        if input.contains("v") { return input.replacingOccurrences(of: "v", with: "b") }
+        if input.contains("b") { return input.replacingOccurrences(of: "b", with: "v") }
+        if input.contains("sh") { return input.replacingOccurrences(of: "sh", with: "s") }
+        return nil
     }
 
-    private func generateAlternative(_ input: String) -> String? {
-        // Generates common phonetic variations (e.g., 'v' <-> 'b', 'sh' <-> 's')
-        if input.contains("v") {
-            return convertPhonetic(input.replacingOccurrences(of: "v", with: "b"))
-        } else if input.contains("b") {
-            return convertPhonetic(input.replacingOccurrences(of: "b", with: "v"))
-        } else if input.contains("sh") {
-            return convertPhonetic(input.replacingOccurrences(of: "sh", with: "s"))
+    // MARK: Phonetic rules
+
+    /// One way to spell a nasal (n or m). The first option of each nasal is the rule-based choice.
+    private enum NasalOption {
+        case anusvara          // ं on the preceding consonant (or alone)
+        case chandrabindu      // ँ after a vowel sign
+        case conjunct(String)  // the nasal is its own consonant, joined to what follows: सम्बन्ध
+        case closed(String)    // the nasal is its own consonant with a final halant: संयम्
+    }
+
+    private enum Token {
+        case consonant(String)                        // base letter, without a vowel sign
+        case vowel(independent: String, matra: String)
+        case other(Character)                         // digits, punctuation, anything else
+        case nasal([NasalOption])                     // n or m with more than one valid spelling
+    }
+
+    /// Consonants before which a nasal becomes anusvara. Other consonants (stops) take a halant conjunct.
+    private static let anusvaraFollowers = ["shh", "shr", "sh", "s", "y", "r", "l", "w", "v", "h"]
+
+    /// Palatal consonants, before which "n" is written as ञ्.
+    private static let palatalFollowers = ["chh", "ch", "jh", "j"]
+
+    /// Longest patterns first, so "chh" wins over "ch" and "c".
+    private static let consonantPatterns: [(roman: String, letter: String)] = [
+        ("chh", "छ"), ("ksh", "क्ष"), ("shr", "श्र"), ("shh", "ष"), ("sh", "श"),
+        ("tr", "त्र"), ("gy", "ज्ञ"), ("ch", "च"), ("kh", "ख"), ("gh", "घ"),
+        ("ng", "ङ"), ("jh", "झ"), ("ny", "ञ"), ("th", "थ"), ("dh", "ध"), ("ph", "फ"), ("bh", "भ"),
+        ("x", "क्स"), ("k", "क"), ("q", "क"), ("c", "क"), ("g", "ग"), ("j", "ज"), ("z", "ज"),
+        ("t", "त"), ("d", "द"), ("n", "न"), ("p", "प"), ("f", "फ"), ("b", "ब"), ("m", "म"),
+        ("y", "य"), ("r", "र"), ("l", "ल"), ("w", "व"), ("v", "व"), ("s", "स"), ("h", "ह"),
+    ].sorted { $0.roman.count > $1.roman.count }
+
+    private static let vowelPatterns: [(roman: String, independent: String, matra: String)] = [
+        ("aa", "आ", "ा"), ("ee", "ई", "ी"), ("ii", "ई", "ी"), ("oo", "ऊ", "ू"), ("uu", "ऊ", "ू"),
+        ("ai", "ऐ", "ै"), ("au", "औ", "ौ"), ("a", "अ", ""), ("i", "इ", "ि"), ("u", "उ", "ु"),
+        ("e", "ए", "े"), ("o", "ओ", "ो"),
+    ].sorted { $0.roman.count > $1.roman.count }
+
+    private static let devanagariDigits = ["०", "१", "२", "३", "४", "५", "६", "७", "८", "९"]
+
+    private func tokenize(_ input: String) -> [Token] {
+        var tokens: [Token] = []
+        var i = input.startIndex
+
+        scan: while i < input.endIndex {
+            let rest = input[i...]
+
+            // Word-final "n" after an explicit vowel sign is chandrabindu (ँ): garaun -> गरौँ.
+            // "garauna" keeps न because the "n" is followed by a vowel.
+            // Word-final "n" after an explicit vowel sign: chandrabindu (garaun -> गरौँ) or न (garaunn).
+            if rest.hasPrefix("n"), input.index(after: i) == input.endIndex,
+               case .vowel(_, let matra)? = tokens.last, !matra.isEmpty {
+                tokens.append(.nasal([.chandrabindu, .conjunct("न")]))
+                i = input.index(after: i)
+                continue scan
+            }
+
+            // Word-final "m" after a consonant and short a: halant (samyam -> संयम्) or anusvara (संयं).
+            // A word like "kam" still ranks काम first through the lexicon.
+            if rest.hasPrefix("m"), input.index(after: i) == input.endIndex, tokens.count >= 2,
+               case .vowel(_, let matra) = tokens[tokens.count - 1], matra.isEmpty,
+               case .consonant = tokens[tokens.count - 2] {
+                tokens.append(.nasal([.closed("म"), .anusvara]))
+                i = input.index(after: i)
+                continue scan
+            }
+
+            // A nasal before a consonant: anusvara (kansha -> कंश, samyam -> संयम) or a conjunct
+            // with halant (sambandha -> सम्बन्ध). Before a sibilant or semivowel anusvara is the
+            // rule-based choice; before a stop the conjunct is. "ng" and "ny" are their own letters.
+            if (rest.hasPrefix("n") || rest.hasPrefix("m")) && !tokens.isEmpty
+                && !rest.hasPrefix("ng") && !rest.hasPrefix("ny") {
+                let after = input.index(after: i)
+                let tail = input[after...]
+                if Self.consonantPatterns.contains(where: { tail.hasPrefix($0.roman) }) {
+                    let letter = rest.hasPrefix("n") ? "न" : "म"
+                    let anusvaraFirst = Self.anusvaraFollowers.contains(where: { tail.hasPrefix($0) })
+                    // "n" before a palatal (च, छ, ज, झ) is ञ्: kanchan -> कञ्चन, panch -> पञ्च.
+                    let palatal = rest.hasPrefix("n") && Self.palatalFollowers.contains(where: { tail.hasPrefix($0) })
+                    let options: [NasalOption]
+                    if palatal {
+                        options = [.conjunct("ञ"), .conjunct("न"), .anusvara]
+                    } else if anusvaraFirst {
+                        options = [.anusvara, .conjunct(letter)]
+                    } else {
+                        options = [.conjunct(letter), .anusvara]
+                    }
+                    tokens.append(.nasal(options))
+                    i = after
+                    continue scan
+                }
+            }
+
+            // "n" before a vowel can be retroflex ण: karnali -> कर्णाली. After "र" ण is the
+            // rule-based choice; elsewhere न is.
+            if rest.hasPrefix("n") && !tokens.isEmpty && !rest.hasPrefix("ng") && !rest.hasPrefix("ny") {
+                let after = input.index(after: i)
+                let tail = input[after...]
+                if Self.vowelPatterns.contains(where: { tail.hasPrefix($0.roman) }) {
+                    var afterR = false
+                    if case .consonant("र")? = tokens.last { afterR = true }
+                    let options: [NasalOption] = afterR
+                        ? [.conjunct("ण"), .conjunct("न")]
+                        : [.conjunct("न"), .conjunct("ण")]
+                    tokens.append(.nasal(options))
+                    i = after
+                    continue scan
+                }
+            }
+
+            // "c" before e, i or y sounds like "s" (ce, ci, cy).
+            if rest.hasPrefix("c") && !rest.hasPrefix("ch") {
+                let next = input.index(after: i)
+                if next < input.endIndex && "eiy".contains(input[next]) {
+                    tokens.append(.consonant("स"))
+                    i = next
+                    continue scan
+                }
+            }
+            if let consonant = Self.consonantPatterns.first(where: { rest.hasPrefix($0.roman) }) {
+                tokens.append(.consonant(consonant.letter))
+                i = input.index(i, offsetBy: consonant.roman.count)
+                continue scan
+            }
+            if let vowel = Self.vowelPatterns.first(where: { rest.hasPrefix($0.roman) }) {
+                tokens.append(.vowel(independent: vowel.independent, matra: vowel.matra))
+                i = input.index(i, offsetBy: vowel.roman.count)
+                continue scan
+            }
+            tokens.append(.other(input[i]))
+            i = input.index(after: i)
         }
-        return nil
+        return tokens
+    }
+
+    /// Rule-based conversion of Latin text to Devanagari (the first spelling from `variants`).
+    ///
+    /// A consonant keeps its inherent "a" unless a vowel sign follows it. Two consonants in a row
+    /// form a conjunct (halant between them), so "shram" becomes श्रम्, not श्र्म.
+    func phonetic(_ input: String) -> String {
+        let tokens = tokenize(input.lowercased())
+        return render(tokens, choices: Array(repeating: 0, count: nasalCount(tokens)))
+    }
+
+    /// Every valid spelling of the input, rule-based spelling first. Nasals (n, m) multiply the
+    /// spellings: sambandha gives सम्बन्ध, संबन्ध, सम्बंध, संबंध. Capped at 32 spellings.
+    func variants(_ input: String) -> [String] {
+        let tokens = tokenize(input.lowercased())
+        let radices = tokens.compactMap { token -> Int? in
+            if case .nasal(let options) = token { return options.count }
+            return nil
+        }
+        var choices = Array(repeating: 0, count: radices.count)
+        var results: [String] = []
+        let limit = 32
+
+        while results.count < limit {
+            let spelling = render(tokens, choices: choices)
+            if !results.contains(spelling) {
+                results.append(spelling)
+            }
+            // Advance the choices like an odometer.
+            var k = 0
+            while k < choices.count {
+                choices[k] += 1
+                if choices[k] < radices[k] { break }
+                choices[k] = 0
+                k += 1
+            }
+            if k == choices.count { break }
+        }
+        return results
+    }
+
+    private func nasalCount(_ tokens: [Token]) -> Int {
+        tokens.reduce(0) { count, token in
+            if case .nasal = token { return count + 1 }
+            return count
+        }
+    }
+
+    /// Renders tokens to Devanagari. `choices[n]` picks the spelling of the n-th nasal.
+    private func render(_ tokens: [Token], choices: [Int]) -> String {
+        var output = ""
+        var pending: String? = nil   // consonant still waiting for its vowel sign
+        var nasalIndex = 0
+
+        for token in tokens {
+            switch token {
+            case .consonant(let letter):
+                if let p = pending { output += p + "्" }
+                pending = letter
+            case .vowel(let independent, let matra):
+                if let p = pending {
+                    output += p + matra
+                    pending = nil
+                } else {
+                    output += independent
+                }
+            case .other(let ch):
+                if let p = pending {
+                    output += p
+                    pending = nil
+                }
+                output += Self.digitOrSelf(ch)
+            case .nasal(let options):
+                let option = options[choices[nasalIndex]]
+                nasalIndex += 1
+                switch option {
+                case .anusvara:
+                    if let p = pending {
+                        output += p + "ं"
+                        pending = nil
+                    } else {
+                        output += "ं"
+                    }
+                case .chandrabindu:
+                    if let p = pending {
+                        output += p
+                        pending = nil
+                    }
+                    output += "ँ"
+                case .conjunct(let letter):
+                    if let p = pending { output += p + "्" }
+                    pending = letter
+                case .closed(let letter):
+                    if let p = pending { output += p + "्" }
+                    pending = nil
+                    output += letter + "्"
+                }
+            }
+        }
+        if let p = pending { output += p }
+        return output
+    }
+
+    private static func digitOrSelf(_ ch: Character) -> String {
+        if let ascii = ch.asciiValue, (48...57).contains(ascii) {
+            return devanagariDigits[Int(ascii) - 48]
+        }
+        return String(ch)
     }
 }
