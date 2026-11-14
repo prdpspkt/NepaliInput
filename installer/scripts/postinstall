@@ -1,0 +1,52 @@
+#!/bin/bash
+# Runs as root after the .pkg copies NepaliInput.app to /Library/Input Methods.
+# Enables the input source for the user who is logged in right now.
+# Never fails the installation: if enabling fails, the app is still installed
+# and the user can add it manually in System Settings.
+
+APP="/Library/Input Methods/NepaliInput.app"
+SOURCE_ID="com.pradeeps.inputmethod.NepaliInput"
+HELPER="$APP/Contents/Resources/register_input_source"
+LOG="/Library/Logs/NepaliInputInstall.log"
+
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
+
+log "postinstall started"
+
+# Remove quarantine so macOS will load the input method without a prompt.
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null
+
+# Make sure the ad-hoc signature is valid on this machine.
+codesign --force --deep --sign - "$APP" >> "$LOG" 2>&1
+
+# Ask Launch Services to register the bundle.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$APP" >> "$LOG" 2>&1
+
+# Find the logged-in user. Installer runs as root, so the enable step must run
+# inside that user's session.
+CONSOLE_USER=$(/usr/bin/stat -f%Su /dev/console)
+CONSOLE_UID=$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null)
+
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ -z "$CONSOLE_UID" ]; then
+    log "No logged-in user found; skipping enable. User must add it manually after login."
+    exit 0
+fi
+
+if [ ! -x "$HELPER" ]; then
+    log "Helper missing at $HELPER; skipping enable."
+    exit 0
+fi
+
+# Register and enable the input source inside the user's login session.
+/bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_USER" \
+    "$HELPER" "$APP" "$SOURCE_ID" >> "$LOG" 2>&1
+STATUS=$?
+
+if [ $STATUS -eq 0 ]; then
+    log "Enabled $SOURCE_ID for $CONSOLE_USER"
+else
+    log "Enable failed (status $STATUS). User should log out and back in, then add Nepali Input in Input Sources."
+fi
+
+exit 0
