@@ -25,11 +25,14 @@ A native macOS Input Method Editor (IME) that works system-wide in every applica
 ### Build & Install
 
 ```bash
-# Build and install to ~/Library/Input Methods
-make install
+./scripts/install.sh
 ```
 
-### Activate
+The script builds the app, installs it to `~/Library/Input Methods`, signs it for your Mac, registers it with macOS, and enables the input source. To remove it, run `./scripts/install.sh --uninstall`.
+
+If **Nepali Input** doesn't appear in System Settings → Keyboard → Input Sources, log out and back in once.
+
+### Activate manually (if needed)
 
 1. Open **System Settings → Keyboard → Input Sources**
 2. Click **Edit...** → **+** (Add input source)
