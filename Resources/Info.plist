@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Nepali Input</string>
+    <key>CFBundleExecutable</key>
+    <string>NepaliInput</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.pradeeps.inputmethod.NepaliInput</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Nepali Input</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <!-- InputMethodKit Configuration -->
+    <key>InputMethodConnectionName</key>
+    <string>com.pradeeps.inputmethod.NepaliInput_Connection</string>
+    <key>InputMethodServerControllerClass</key>
+    <string>NepaliInputController</string>
+
+    <!-- Run as background process (no dock icon) -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSBackgroundOnly</key>
+    <false/>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- Menu Bar Icon Configuration -->
+    <key>TISIconIsTemplate</key>
+    <true/>
+    <key>TISIntendedLanguage</key>
+    <string>ne</string>
+    <key>tsInputMethodIconFileKey</key>
+    <string>NepaliInput.tiff</string>
+
+    <!-- Input source definition -->
+    <key>tsInputModeListKey</key>
+    <dict>
+        <key>com.pradeeps.inputmethod.NepaliInput</key>
+        <dict>
+            <key>TISInputSourceID</key>
+            <string>com.pradeeps.inputmethod.NepaliInput</string>
+            <key>tsInputModeMenuIconFileKey</key>
+            <string>NepaliInput.tiff</string>
+            <key>tsInputModeAlternateMenuIconFileKey</key>
+            <string>NepaliInput.tiff</string>
+            <key>tsInputModeDefaultStateKey</key>
+            <true/>
+            <key>tsInputModePrimaryInScriptKey</key>
+            <true/>
+            <key>tsInputModeScriptKey</key>
+            <string>smUnicodeScript</string>
+            <key>tsInputModeIsVisibleKey</key>
+            <true/>
+        </dict>
+    </dict>
+</dict>
+</plist>
