@@ -16,6 +16,18 @@ log "postinstall started"
 # Remove quarantine so macOS will load the input method without a prompt.
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null
 
+# Replace any older per-user copy (for example one from `make install`), so only
+# this installed version is loaded. Otherwise macOS can keep using the old bundle.
+CONSOLE_USER_EARLY=$(/usr/bin/stat -f%Su /dev/console)
+if [ -n "$CONSOLE_USER_EARLY" ] && [ "$CONSOLE_USER_EARLY" != "root" ]; then
+    USER_HOME=$(/usr/bin/dscl . -read "/Users/$CONSOLE_USER_EARLY" NFSHomeDirectory 2>/dev/null | /usr/bin/awk '{print $2}')
+    OLD_COPY="$USER_HOME/Library/Input Methods/NepaliInput.app"
+    if [ -n "$USER_HOME" ] && [ -d "$OLD_COPY" ]; then
+        rm -rf "$OLD_COPY"
+        log "Removed older per-user copy at $OLD_COPY"
+    fi
+fi
+
 # Make sure the ad-hoc signature is valid on this machine.
 codesign --force --deep --sign - "$APP" >> "$LOG" 2>&1
 
