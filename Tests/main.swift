@@ -62,6 +62,25 @@ check(rules.phonetic("kanya"), "कञ", "ny is the letter ञ, not anusvara")
 check(rules.phonetic("123"), "१२३", "ASCII digits become Devanagari")
 check(rules.phonetic("ma 1"), "म १", "space and digit pass through")
 
+// Dental and retroflex pairs: both spellings are offered, dental first, and the other one follows.
+check(rules.variants("ta").joined(separator: " "), "त ट", "ta offers त then ट")
+check(rules.variants("tha").joined(separator: " "), "थ ठ", "tha offers थ then ठ")
+check(rules.variants("da").joined(separator: " "), "द ड", "da offers द then ड")
+check(rules.variants("dha").joined(separator: " "), "ध ढ", "dha offers ध then ढ")
+check(rules.phonetic("ta"), "त", "phonetic output stays dental for ta")
+check(rules.phonetic("dhan"), "धन", "phonetic output stays dental for dha")
+checkTrue(rules.variants("tapai").contains("टपै"), "tapai offers retroflex ट")
+checkTrue(rules.variants("dhaka").contains("ढक"), "dhaka offers retroflex ढ")
+check(rules.variants("tr").first ?? "", "त्र", "tr stays त्र")
+checkTrue(rules.variants("tr").count == 1, "tr has a single spelling")
+// Single changes come before combinations of several changes.
+let tatha = rules.variants("tatha")
+checkTrue(tatha.first == "तथ", "tatha: all dental first")
+checkTrue(tatha.firstIndex(of: "टथ") ?? 99 < tatha.firstIndex(of: "टठ") ?? 0, "tatha: one change before two changes")
+checkTrue(tatha.count == 4, "tatha has four spellings")
+checkTrue(rules.variants("kam").contains("कं"), "kam still offers anusvara for final m")
+checkTrue(rules.variants("dam").contains("दं"), "dam: final m after a consonant still offers anusvara")
+
 // MARK: - Lexicon ranking
 
 let seedPath = CommandLine.arguments.count > 1
@@ -88,6 +107,7 @@ checkTrue(engine.transliterate(text: "pani", languageCode: "ne").contains("प�
 check(engine.transliterate(text: "gaunle", languageCode: "ne").first ?? "", "गाउँले", "gaunle from lexicon")
 check(engine.transliterate(text: "gaun", languageCode: "ne").first ?? "", "गाउँ", "gaun from lexicon")
 check(engine.transliterate(text: "garaun", languageCode: "ne").first ?? "", "गरौँ", "garaun from lexicon")
+check(engine.transliterate(text: "gaindakot", languageCode: "ne").first ?? "", "गैंडाकोट", "gaindakot from lexicon")
 
 // Nasal variants: every valid spelling is offered, rule-based first.
 let sambandhaVariants = rules.variants("sambandha")

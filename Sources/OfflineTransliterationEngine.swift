@@ -92,19 +92,21 @@ final class OfflineTransliterationEngine {
 
     // MARK: Phonetic rules
 
-    /// One way to spell a nasal (n or m). The first option of each nasal is the rule-based choice.
-    private enum NasalOption {
+    /// One way to spell an ambiguous letter: a nasal (n, m) or a dental/retroflex pair (t, d).
+    /// The first option of each choice is the rule-based spelling.
+    private enum Choice {
         case anusvara          // ं on the preceding consonant (or alone)
         case chandrabindu      // ँ after a vowel sign
         case conjunct(String)  // the nasal is its own consonant, joined to what follows: सम्बन्ध
         case closed(String)    // the nasal is its own consonant with a final halant: संयम्
+        case letter(String)    // a consonant on its own, from a dental/retroflex pair: ट or त
     }
 
     private enum Token {
         case consonant(String)                        // base letter, without a vowel sign
         case vowel(independent: String, matra: String)
         case other(Character)                         // digits, punctuation, anything else
-        case nasal([NasalOption])                     // n or m with more than one valid spelling
+        case choice([Choice])                         // a letter with more than one valid spelling
     }
 
     /// Consonants before which a nasal becomes anusvara. Other consonants (stops) take a halant conjunct.
@@ -112,6 +114,12 @@ final class OfflineTransliterationEngine {
 
     /// Palatal consonants, before which "n" is written as ञ्.
     private static let palatalFollowers = ["chh", "ch", "jh", "j"]
+
+    /// Dental and retroflex consonants. "t" is त or ट, "d" is द or ड, and the aspirated forms
+    /// th and dh have their own pairs. Longest first, so "th" and "dh" win over "t" and "d".
+    private static let retroflexPairs: [(roman: String, dental: String, retroflex: String)] = [
+        ("th", "थ", "ठ"), ("dh", "ध", "ढ"), ("t", "त", "ट"), ("d", "द", "ड"),
+    ]
 
     /// Longest patterns first, so "chh" wins over "ch" and "c".
     private static let consonantPatterns: [(roman: String, letter: String)] = [
@@ -143,7 +151,7 @@ final class OfflineTransliterationEngine {
             // Word-final "n" after an explicit vowel sign: chandrabindu (garaun -> गरौँ) or न (garaunn).
             if rest.hasPrefix("n"), input.index(after: i) == input.endIndex,
                case .vowel(_, let matra)? = tokens.last, !matra.isEmpty {
-                tokens.append(.nasal([.chandrabindu, .conjunct("न")]))
+                tokens.append(.choice([.chandrabindu, .conjunct("न")]))
                 i = input.index(after: i)
                 continue scan
             }
@@ -152,8 +160,8 @@ final class OfflineTransliterationEngine {
             // A word like "kam" still ranks काम first through the lexicon.
             if rest.hasPrefix("m"), input.index(after: i) == input.endIndex, tokens.count >= 2,
                case .vowel(_, let matra) = tokens[tokens.count - 1], matra.isEmpty,
-               case .consonant = tokens[tokens.count - 2] {
-                tokens.append(.nasal([.closed("म"), .anusvara]))
+               Self.isConsonant(tokens[tokens.count - 2]) {
+                tokens.append(.choice([.closed("म"), .anusvara]))
                 i = input.index(after: i)
                 continue scan
             }
@@ -170,7 +178,7 @@ final class OfflineTransliterationEngine {
                     let anusvaraFirst = Self.anusvaraFollowers.contains(where: { tail.hasPrefix($0) })
                     // "n" before a palatal (च, छ, ज, झ) is ञ्: kanchan -> कञ्चन, panch -> पञ्च.
                     let palatal = rest.hasPrefix("n") && Self.palatalFollowers.contains(where: { tail.hasPrefix($0) })
-                    let options: [NasalOption]
+                    let options: [Choice]
                     if palatal {
                         options = [.conjunct("ञ"), .conjunct("न"), .anusvara]
                     } else if anusvaraFirst {
@@ -178,7 +186,7 @@ final class OfflineTransliterationEngine {
                     } else {
                         options = [.conjunct(letter), .anusvara]
                     }
-                    tokens.append(.nasal(options))
+                    tokens.append(.choice(options))
                     i = after
                     continue scan
                 }
@@ -192,10 +200,10 @@ final class OfflineTransliterationEngine {
                 if Self.vowelPatterns.contains(where: { tail.hasPrefix($0.roman) }) {
                     var afterR = false
                     if case .consonant("र")? = tokens.last { afterR = true }
-                    let options: [NasalOption] = afterR
+                    let options: [Choice] = afterR
                         ? [.conjunct("ण"), .conjunct("न")]
                         : [.conjunct("न"), .conjunct("ण")]
-                    tokens.append(.nasal(options))
+                    tokens.append(.choice(options))
                     i = after
                     continue scan
                 }
@@ -209,6 +217,14 @@ final class OfflineTransliterationEngine {
                     i = next
                     continue scan
                 }
+            }
+            // "t" and "d" (and th, dh) are dental or retroflex: ta -> त or ट, da -> द or ड.
+            // "tr" stays त्र. The dental spelling is the rule-based choice.
+            if !rest.hasPrefix("tr"),
+               let pair = Self.retroflexPairs.first(where: { rest.hasPrefix($0.roman) }) {
+                tokens.append(.choice([.letter(pair.dental), .letter(pair.retroflex)]))
+                i = input.index(i, offsetBy: pair.roman.count)
+                continue scan
             }
             if let consonant = Self.consonantPatterns.first(where: { rest.hasPrefix($0.roman) }) {
                 tokens.append(.consonant(consonant.letter))
@@ -232,51 +248,78 @@ final class OfflineTransliterationEngine {
     /// form a conjunct (halant between them), so "shram" becomes श्रम्, not श्र्म.
     func phonetic(_ input: String) -> String {
         let tokens = tokenize(input.lowercased())
-        return render(tokens, choices: Array(repeating: 0, count: nasalCount(tokens)))
+        return render(tokens, choices: Array(repeating: 0, count: choiceCount(tokens)))
     }
 
-    /// Every valid spelling of the input, rule-based spelling first. Nasals (n, m) multiply the
-    /// spellings: sambandha gives सम्बन्ध, संबन्ध, सम्बंध, संबंध. Capped at 32 spellings.
+    /// Every valid spelling of the input, rule-based spelling first, then spellings with one
+    /// changed choice, then two, and so on. Choices multiply the spellings: sambandha gives
+    /// सम्बन्ध, संबन्ध, सम्बंध, संबंध, and ta gives त and ट. Capped at 32 spellings.
     func variants(_ input: String) -> [String] {
         let tokens = tokenize(input.lowercased())
         let radices = tokens.compactMap { token -> Int? in
-            if case .nasal(let options) = token { return options.count }
+            if case .choice(let options) = token { return options.count }
             return nil
         }
         var choices = Array(repeating: 0, count: radices.count)
         var results: [String] = []
+        var seen = Set<String>()
         let limit = 32
 
-        while results.count < limit {
-            let spelling = render(tokens, choices: choices)
-            if !results.contains(spelling) {
-                results.append(spelling)
+        // Collects spellings that change exactly `changesLeft` choices, starting at `start`.
+        func collect(from start: Int, changesLeft: Int) {
+            if results.count >= limit { return }
+            if changesLeft == 0 {
+                let spelling = render(tokens, choices: choices)
+                if seen.insert(spelling).inserted {
+                    results.append(spelling)
+                }
+                return
             }
-            // Advance the choices like an odometer.
-            var k = 0
-            while k < choices.count {
-                choices[k] += 1
-                if choices[k] < radices[k] { break }
-                choices[k] = 0
-                k += 1
+            guard start < choices.count else { return }
+            for position in start..<choices.count {
+                for option in 1..<radices[position] {
+                    choices[position] = option
+                    collect(from: position + 1, changesLeft: changesLeft - 1)
+                    choices[position] = 0
+                    if results.count >= limit { return }
+                }
             }
-            if k == choices.count { break }
+        }
+
+        for changes in 0...choices.count {
+            collect(from: 0, changesLeft: changes)
+            if results.count >= limit { break }
         }
         return results
     }
 
-    private func nasalCount(_ tokens: [Token]) -> Int {
+    /// Whether a token is a consonant that a following halant or vowel can attach to.
+    private static func isConsonant(_ token: Token) -> Bool {
+        switch token {
+        case .consonant:
+            return true
+        case .choice(let options):
+            return options.allSatisfy { option in
+                if case .letter = option { return true }
+                return false
+            }
+        default:
+            return false
+        }
+    }
+
+    private func choiceCount(_ tokens: [Token]) -> Int {
         tokens.reduce(0) { count, token in
-            if case .nasal = token { return count + 1 }
+            if case .choice = token { return count + 1 }
             return count
         }
     }
 
-    /// Renders tokens to Devanagari. `choices[n]` picks the spelling of the n-th nasal.
+    /// Renders tokens to Devanagari. `choices[n]` picks the spelling of the n-th choice.
     private func render(_ tokens: [Token], choices: [Int]) -> String {
         var output = ""
         var pending: String? = nil   // consonant still waiting for its vowel sign
-        var nasalIndex = 0
+        var choiceIndex = 0
 
         for token in tokens {
             switch token {
@@ -296,9 +339,9 @@ final class OfflineTransliterationEngine {
                     pending = nil
                 }
                 output += Self.digitOrSelf(ch)
-            case .nasal(let options):
-                let option = options[choices[nasalIndex]]
-                nasalIndex += 1
+            case .choice(let options):
+                let option = options[choices[choiceIndex]]
+                choiceIndex += 1
                 switch option {
                 case .anusvara:
                     if let p = pending {
@@ -313,7 +356,7 @@ final class OfflineTransliterationEngine {
                         pending = nil
                     }
                     output += "ँ"
-                case .conjunct(let letter):
+                case .conjunct(let letter), .letter(let letter):
                     if let p = pending { output += p + "्" }
                     pending = letter
                 case .closed(let letter):
