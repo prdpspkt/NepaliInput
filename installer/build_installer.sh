@@ -14,7 +14,7 @@ set -euo pipefail
 # Stop macOS from adding AppleDouble "._" files to the package payload.
 export COPYFILE_DISABLE=1
 
-VERSION="1.1"
+VERSION="1.2"
 APP_NAME="NepaliInput"
 APP_BUNDLE="$APP_NAME.app"
 PKG_ID="com.pradeeps.inputmethod.NepaliInput.installer"
