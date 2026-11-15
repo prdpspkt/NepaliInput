@@ -186,6 +186,13 @@ final class OfflineTransliterationEngine {
                     } else {
                         options = [.conjunct(letter), .anusvara]
                     }
+                    // A nasal "n" after a vowel can also be chandrabindu (ँ) on that vowel: bajaaundai
+                    // is बजाउँदै as well as बजाउन्दै and बजाउंदै. It goes second, after the rule-based spelling.
+                    if rest.hasPrefix("n"), case .vowel? = tokens.last {
+                        tokens.append(.choice(Array(options.prefix(1)) + [.chandrabindu] + Array(options.dropFirst())))
+                        i = after
+                        continue scan
+                    }
                     tokens.append(.choice(options))
                     i = after
                     continue scan
