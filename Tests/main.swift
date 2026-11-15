@@ -81,6 +81,15 @@ checkTrue(tatha.count == 4, "tatha has four spellings")
 checkTrue(rules.variants("kam").contains("कं"), "kam still offers anusvara for final m")
 checkTrue(rules.variants("dam").contains("दं"), "dam: final m after a consonant still offers anusvara")
 
+// A nasal "n" after a vowel offers chandrabindu as well as anusvara, right after the rule-based spelling.
+let bajaaundai = rules.variants("bajaaundai")
+checkTrue(bajaaundai.contains("बजाउँदै"), "bajaaundai offers chandrabindu (बजाउँदै)")
+checkTrue(bajaaundai.contains("बजाउंदै"), "bajaaundai still offers anusvara (बजाउंदै)")
+checkTrue(bajaaundai.firstIndex(of: "बजाउँदै") == 1, "bajaaundai: chandrabindu is the second spelling")
+checkTrue(rules.variants("paanch").contains("पाँच"), "paanch offers chandrabindu (पाँच)")
+checkTrue(rules.variants("kansha").contains("कँश"), "kansha: n after a vowel also offers chandrabindu")
+checkTrue(!rules.variants("samyam").contains { $0.contains("ँ") }, "samyam: m never offers chandrabindu")
+
 // MARK: - Lexicon ranking
 
 let seedPath = CommandLine.arguments.count > 1
